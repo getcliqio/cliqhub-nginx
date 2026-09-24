@@ -1,0 +1,208 @@
+worker_processes auto;
+error_log /dev/stderr warn;
+pid /tmp/nginx.pid;
+
+events {
+    worker_connections 1024;
+}
+
+http {
+    log_format main '$remote_addr - [$time_local] "$request" '
+                    '$status $body_bytes_sent '
+                    '"$http_user_agent" '
+                    'rt=$request_time uct=$upstream_connect_time urt=$upstream_response_time';
+
+    access_log /dev/stdout main;
+
+    gzip on;
+    gzip_vary on;
+    gzip_proxied any;
+    gzip_min_length 1000;
+    gzip_types
+        text/plain
+        text/css
+        text/javascript
+        application/json
+        application/javascript
+        application/xml
+        image/svg+xml;
+
+    proxy_buffering on;
+    proxy_buffer_size 16k;
+    proxy_buffers 8 32k;
+    proxy_busy_buffers_size 64k;
+
+    proxy_connect_timeout 10s;
+    proxy_send_timeout 30s;
+    proxy_read_timeout 60s;
+
+    client_max_body_size 50m;
+
+    # Re-resolve Railway private DNS periodically. Static `upstream { server host }`
+    # caches the IP at start and 504s after BFF/backend redeploy.
+    resolver ${DNS_RESOLVER} valid=10s ipv6=on;
+    resolver_timeout 5s;
+
+    # ------------------------------------------------------------------
+    # api.cliqhub.io — Bearer API only → Hub BFF (/v1) → Core API.
+    # Clients never hit backend :4000 directly.
+    # ------------------------------------------------------------------
+    server {
+        listen ${PORT};
+        server_name ${API_SERVER_NAMES};
+
+        add_header X-Frame-Options "SAMEORIGIN" always;
+        add_header X-Content-Type-Options "nosniff" always;
+        add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+        add_header X-Request-ID $request_id always;
+
+        location = /nginx-health {
+            access_log off;
+            return 200 '{"status":"ok"}';
+            default_type application/json;
+        }
+
+        location = /bff-health {
+            set $bff_upstream http://${BFF_UPSTREAM};
+            proxy_pass $bff_upstream;
+            proxy_http_version 1.1;
+            proxy_set_header Host $host;
+            proxy_set_header Connection "";
+        }
+
+        # Public A2A agent cards + invoke (BFF → Core)
+        location /a2a/ {
+            set $bff_upstream http://${BFF_UPSTREAM};
+            proxy_pass $bff_upstream;
+            proxy_http_version 1.1;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+            proxy_set_header Connection "";
+            proxy_buffering off;
+        }
+
+        # Sync service — daemon long-poll (extended read timeout)
+        location /v1/sync/ {
+            set $sync_upstream http://${SYNC_UPSTREAM};
+            proxy_pass $sync_upstream;
+            proxy_http_version 1.1;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+            proxy_set_header X-Request-ID $request_id;
+            proxy_set_header Connection "";
+            proxy_read_timeout 90s;
+        }
+
+        # Builder LLM calls can exceed the default 60s read timeout
+        location /v1/builder/ {
+            set $bff_upstream http://${BFF_UPSTREAM};
+            proxy_pass $bff_upstream;
+            proxy_http_version 1.1;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+            proxy_set_header X-Request-ID $request_id;
+            proxy_set_header Connection "";
+            proxy_read_timeout 180s;
+            proxy_send_timeout 180s;
+        }
+
+        location /v1/ {
+            set $bff_upstream http://${BFF_UPSTREAM};
+            proxy_pass $bff_upstream;
+            proxy_http_version 1.1;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+            proxy_set_header X-Request-ID $request_id;
+            proxy_set_header Connection "";
+        }
+
+        location /api/ {
+            default_type application/json;
+            return 404 '{"ok":false,"error":{"code":"gone","message":"Use https://api.cliqhub.io/v1"}}';
+        }
+
+        location / {
+            default_type application/json;
+            return 404 '{"ok":false,"error":{"code":"not_found","message":"API base is /v1"}}';
+        }
+    }
+
+    # ------------------------------------------------------------------
+    # cliqhub.io — SPA + web BFF (session cookies) → Hub backend via BFF.
+    # ------------------------------------------------------------------
+    server {
+        listen ${PORT} default_server;
+        server_name ${WEB_SERVER_NAMES} _;
+
+        add_header X-Frame-Options "SAMEORIGIN" always;
+        add_header X-Content-Type-Options "nosniff" always;
+        add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+        add_header X-Request-ID $request_id always;
+
+        location = /nginx-health {
+            access_log off;
+            return 200 '{"status":"ok"}';
+            default_type application/json;
+        }
+
+        location = /bff-health {
+            set $bff_upstream http://${BFF_UPSTREAM};
+            proxy_pass $bff_upstream;
+            proxy_http_version 1.1;
+            proxy_set_header Host $host;
+            proxy_set_header Connection "";
+        }
+
+        # Builder LLM — longer than default 60s (generate often 30–120s)
+        location /v1/builder/ {
+            set $bff_upstream http://${BFF_UPSTREAM};
+            proxy_pass $bff_upstream;
+            proxy_http_version 1.1;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+            proxy_set_header X-Request-ID $request_id;
+            proxy_set_header Connection "";
+            proxy_read_timeout 180s;
+            proxy_send_timeout 180s;
+        }
+
+        location /v1/ {
+            set $bff_upstream http://${BFF_UPSTREAM};
+            proxy_pass $bff_upstream;
+            proxy_http_version 1.1;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+            proxy_set_header X-Request-ID $request_id;
+            proxy_set_header Connection "";
+        }
+
+        location /api/ {
+            default_type application/json;
+            return 404 '{"ok":false,"error":{"code":"gone","message":"Use /v1 (SPA) or https://api.cliqhub.io/v1 (Bearer)"}}';
+        }
+
+        location / {
+            set $bff_upstream http://${BFF_UPSTREAM};
+            proxy_pass $bff_upstream;
+            proxy_http_version 1.1;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+            proxy_set_header X-Request-ID $request_id;
+            proxy_set_header Connection "";
+        }
+    }
+}

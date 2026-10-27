@@ -97,6 +97,40 @@ http {
             proxy_read_timeout 90s;
         }
 
+        # Files (PLAN-hug-requests §6.6): every byte goes through the BFF to Core; only Core talks
+        # to R2. Uploads stream with no request buffering and the system file limit; downloads
+        # stream unbuffered and uncompressed so Range and Content-Length pass through.
+        location = /v1/artifacts/upload {
+            set $bff_upstream http://${BFF_UPSTREAM};
+            proxy_pass $bff_upstream;
+            proxy_http_version 1.1;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+            proxy_set_header X-Request-ID $request_id;
+            proxy_set_header Connection "";
+            client_max_body_size ${ARTIFACT_MAX_MB}m;
+            proxy_request_buffering off;
+            proxy_read_timeout 300s;
+            proxy_send_timeout 300s;
+        }
+
+        location = /v1/artifacts/download {
+            set $bff_upstream http://${BFF_UPSTREAM};
+            proxy_pass $bff_upstream;
+            proxy_http_version 1.1;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+            proxy_set_header X-Request-ID $request_id;
+            proxy_set_header Connection "";
+            proxy_buffering off;
+            gzip off;
+            proxy_read_timeout 300s;
+        }
+
         # Builder LLM calls can exceed the default 60s read timeout
         location /v1/builder/ {
             set $bff_upstream http://${BFF_UPSTREAM};
@@ -159,6 +193,40 @@ http {
             proxy_http_version 1.1;
             proxy_set_header Host $host;
             proxy_set_header Connection "";
+        }
+
+        # Files (PLAN-hug-requests §6.6): every byte goes through the BFF to Core; only Core talks
+        # to R2. Uploads stream with no request buffering and the system file limit; downloads
+        # stream unbuffered and uncompressed so Range and Content-Length pass through.
+        location = /v1/artifacts/upload {
+            set $bff_upstream http://${BFF_UPSTREAM};
+            proxy_pass $bff_upstream;
+            proxy_http_version 1.1;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+            proxy_set_header X-Request-ID $request_id;
+            proxy_set_header Connection "";
+            client_max_body_size ${ARTIFACT_MAX_MB}m;
+            proxy_request_buffering off;
+            proxy_read_timeout 300s;
+            proxy_send_timeout 300s;
+        }
+
+        location = /v1/artifacts/download {
+            set $bff_upstream http://${BFF_UPSTREAM};
+            proxy_pass $bff_upstream;
+            proxy_http_version 1.1;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+            proxy_set_header X-Request-ID $request_id;
+            proxy_set_header Connection "";
+            proxy_buffering off;
+            gzip off;
+            proxy_read_timeout 300s;
         }
 
         # Builder LLM — longer than default 60s (generate often 30–120s)

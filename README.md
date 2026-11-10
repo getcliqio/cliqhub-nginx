@@ -39,7 +39,7 @@ server adds **no headers** — in particular no `X-Frame-Options` — and the BF
 BFF answers `/hb/` only when it is its `CONTENT_ORIGIN` host. Cookies are not forwarded.
 
 To deploy it: DNS and TLS for `content.cliqhub.io` on this service (Railway custom domain), and on the BFF
-`CONTENT_ORIGIN=https://content.cliqhub.io` and `HUB_ORIGIN=https://cliqhub.io`.
+`CONTENT_ORIGIN=https://content.cliqhub.io` and `HUB_ORIGIN="https://cliqhub.io https://www.cliqhub.io"` — every host the Hub is served on (`WEB_SERVER_NAMES`), or hugs won't load on the missing one.
 
 ## Local topology check
 

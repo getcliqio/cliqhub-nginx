@@ -34,6 +34,8 @@ esac
 # Host-based routing (Slice F). Override in Railway if needed.
 : "${API_SERVER_NAMES:=api.cliqhub.io}"
 : "${WEB_SERVER_NAMES:=cliqhub.io www.cliqhub.io}"
+# Hug frontends (PLAN-hug-widgets §7.1): the BFF's CONTENT_ORIGIN host.
+: "${CONTENT_SERVER_NAMES:=content.cliqhub.io}"
 
 # Prefer the container's nameserver so .railway.internal resolves; fall back
 # to Docker embedded DNS for local compose. nginx requires IPv6 literals in [].
@@ -50,15 +52,16 @@ case "$DNS_RESOLVER" in
         ;;
 esac
 
-export API_SERVER_NAMES WEB_SERVER_NAMES DNS_RESOLVER
+export API_SERVER_NAMES WEB_SERVER_NAMES CONTENT_SERVER_NAMES DNS_RESOLVER
 
 echo "[nginx] BFF_UPSTREAM=${BFF_UPSTREAM}"
 echo "[nginx] BACKEND_UPSTREAM=${BACKEND_UPSTREAM}"
 echo "[nginx] SYNC_UPSTREAM=${SYNC_UPSTREAM}"
 echo "[nginx] DNS_RESOLVER=${DNS_RESOLVER}"
 echo "[nginx] ARTIFACT_MAX_MB=${ARTIFACT_MAX_MB}"
+echo "[nginx] CONTENT_SERVER_NAMES=${CONTENT_SERVER_NAMES}"
 
-envsubst '${PORT} ${BFF_UPSTREAM} ${BACKEND_UPSTREAM} ${SYNC_UPSTREAM} ${API_SERVER_NAMES} ${WEB_SERVER_NAMES} ${DNS_RESOLVER} ${ARTIFACT_MAX_MB}' \
+envsubst '${PORT} ${BFF_UPSTREAM} ${BACKEND_UPSTREAM} ${SYNC_UPSTREAM} ${API_SERVER_NAMES} ${WEB_SERVER_NAMES} ${CONTENT_SERVER_NAMES} ${DNS_RESOLVER} ${ARTIFACT_MAX_MB}' \
     < /etc/nginx/nginx.conf.template > /etc/nginx/nginx.conf
 
 exec nginx -g 'daemon off;'

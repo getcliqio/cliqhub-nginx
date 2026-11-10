@@ -170,6 +170,44 @@ http {
     }
 
     # ------------------------------------------------------------------
+    # content.cliqhub.io — hug frontends (PLAN-hug-widgets §7): only /hb/<sha256>/… → BFF, which answers
+    # them only for this host and sends the frame's own headers (CSP with frame-ancestors, nosniff,
+    # no referrer, CORS for fonts, immutable caching). No add_header here — no X-Frame-Options: the Hub
+    # frames these pages. No cookies forwarded (the Hub's are host-only anyway). Nothing else served.
+    # ------------------------------------------------------------------
+    server {
+        listen ${PORT};
+        server_name ${CONTENT_SERVER_NAMES};
+
+        location = /nginx-health {
+            access_log off;
+            return 200 '{"status":"ok"}';
+            default_type application/json;
+        }
+
+        location ~ ^/hb/[0-9a-f]{64}/ {
+            limit_except GET {
+                deny all;
+            }
+            set $bff_upstream http://${BFF_UPSTREAM};
+            proxy_pass $bff_upstream;
+            proxy_http_version 1.1;
+            proxy_set_header Host $host;
+            proxy_set_header Cookie "";
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+            proxy_set_header X-Request-ID $request_id;
+            proxy_set_header Connection "";
+        }
+
+        location / {
+            default_type text/plain;
+            return 404 'Not found';
+        }
+    }
+
+    # ------------------------------------------------------------------
     # cliqhub.io — SPA + web BFF (session cookies) → Hub backend via BFF.
     # ------------------------------------------------------------------
     server {

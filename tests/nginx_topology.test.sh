@@ -12,10 +12,11 @@ export BACKEND_UPSTREAM=backend.internal:4000
 export SYNC_UPSTREAM=sync.internal:3002
 export API_SERVER_NAMES=api.cliqhub.io
 export WEB_SERVER_NAMES='cliqhub.io www.cliqhub.io'
+export CONTENT_SERVER_NAMES=content.cliqhub.io
 export DNS_RESOLVER=127.0.0.11
 export ARTIFACT_MAX_MB=50
 
-envsubst '${PORT} ${BFF_UPSTREAM} ${BACKEND_UPSTREAM} ${SYNC_UPSTREAM} ${API_SERVER_NAMES} ${WEB_SERVER_NAMES} ${DNS_RESOLVER} ${ARTIFACT_MAX_MB}' \
+envsubst '${PORT} ${BFF_UPSTREAM} ${BACKEND_UPSTREAM} ${SYNC_UPSTREAM} ${API_SERVER_NAMES} ${WEB_SERVER_NAMES} ${CONTENT_SERVER_NAMES} ${DNS_RESOLVER} ${ARTIFACT_MAX_MB}' \
     < "$ROOT/nginx.conf.template" > "$TMP/nginx.conf"
 
 fail() { echo "FAIL: $*" >&2; exit 1; }
@@ -60,4 +61,19 @@ for host in 'api.cliqhub.io' 'cliqhub.io www.cliqhub.io'; do
 done
 grep -q 'ARTIFACT_MAX_MB' "$ROOT/entrypoint.sh" || fail 'entrypoint must require ARTIFACT_MAX_MB'
 
-echo "OK: nginx topology (api.cliqhub.io → bff /v1+/a2a; cliqhub.io → bff; DNS re-resolve; streamed file upload/download)"
+# Hug frontends (PLAN-hug-widgets §7): content.cliqhub.io serves only /hb/<sha256>/… from the BFF, with the
+# BFF's own headers — no X-Frame-Options (the Hub frames them), no cookies forwarded, nothing else.
+content="$(awk '/server_name content.cliqhub.io/,/^    }/' "$TMP/nginx.conf")"
+[ -n "$content" ] || fail 'missing content.cliqhub.io server'
+printf '%s' "$content" | grep -q 'location ~ ^/hb/\[0-9a-f\]{64}/' || fail 'content host must serve /hb/<sha256>/'
+printf '%s' "$content" | grep -q 'bff.internal:3001' || fail 'content host must proxy /hb/ to the bff'
+printf '%s' "$content" | grep -q 'proxy_set_header Host \$host;' || fail 'content host must keep Host (the BFF answers only for it)'
+printf '%s' "$content" | grep -q 'proxy_set_header Cookie "";' || fail 'content host must not forward cookies'
+printf '%s' "$content" | grep -q 'limit_except GET' || fail 'content host must allow GET/HEAD only'
+printf '%s' "$content" | grep -q 'add_header' && fail 'content host must add no headers (no X-Frame-Options)'
+printf '%s' "$content" | grep -q 'location /v1/' && fail 'content host must not serve the API'
+printf '%s' "$content" | grep -q 'backend.internal:4000' && fail 'content host must never reach Core'
+[ "$(printf '%s' "$content" | grep -c 'proxy_pass')" = "1" ] || fail 'content host must proxy only /hb/'
+grep -q 'CONTENT_SERVER_NAMES:=content.cliqhub.io' "$ROOT/entrypoint.sh" || fail 'entrypoint must default CONTENT_SERVER_NAMES'
+
+echo "OK: nginx topology (api.cliqhub.io → bff /v1+/a2a; cliqhub.io → bff; content.cliqhub.io → bff /hb/ only; DNS re-resolve; streamed file upload/download)"
